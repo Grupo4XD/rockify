@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:pruebas2_original/main.dart';
 
 class Pantallalogin extends StatefulWidget {
   const Pantallalogin({super.key});

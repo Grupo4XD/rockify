@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:pruebas2_original/screens/pantallaLogin.dart';
+import 'package:pruebas2_original/screens/pantallaSpotifyWeb.dart';
 
 class Pantallahome extends StatefulWidget {
   const Pantallahome({super.key});
@@ -41,15 +41,18 @@ class _PantallahomeState extends State<Pantallahome> {
               width: double.infinity, 
               child: ElevatedButton(
                 style: estiloBotones, // Le aplicamos nuestro estilo único
-                onPressed: () {
-                  Navigator.push(
+                onPressed: () async {
+                  //El resultado  se gaurda en una variable
+                  final String? codigo = await Navigator.push(
                   //El context tienen todos los widgets
                   context,
                   //El materialpageroute es un braper que simplifica la navegacion
                   MaterialPageRoute(
-                    builder: (context) => Pantallalogin()
+                    builder: (context) => Pantallaspotifyweb()
                   ),
                 );
+                print("El codigo de autenticacion es $codigo");
+
                 },
                 child: Text("Crear sala"),
               ),
