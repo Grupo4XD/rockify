@@ -21,7 +21,7 @@ class _PantallaspotifywebState extends State<Pantallaspotifyweb> {
     // Aquí adentro metes toda la configuración del controlador que te pasé hace un momento
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      //Escucha eventos del navegador
+      //Escucha eventos del navegador 
       ..setNavigationDelegate(
         NavigationDelegate(
           //El parametro request contiene toda la informacion a a la que el usuario intenta ir
@@ -29,6 +29,7 @@ class _PantallaspotifywebState extends State<Pantallaspotifyweb> {
             if (request.url.startsWith('https://macrobyte.site')) {
               //Agarramos la respuesta de la URL, convirtiendolo en un map
               Uri uri = Uri.parse(request.url);
+              print("EL PARSE HACE LO SIGUIENTE CON L AUROI $uri");
               //Partimos en partes la URL y sacamos el valor code
               String? authCode = uri.queryParameters['code'];
               if (authCode != null) {
@@ -39,7 +40,7 @@ class _PantallaspotifywebState extends State<Pantallaspotifyweb> {
                   context,
                   MaterialPageRoute(
                     builder: (context) =>
-                        Pantallasala(codigo: authCode,),
+                        PantallaSala(codigoDeAutorizacion: authCode,),
                   ),
                 ); // Devuelve el código
               }

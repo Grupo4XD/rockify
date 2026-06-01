@@ -1,138 +1,338 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:math'; // Para generar el número de sala aleatorio
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart'; // Librería de Firebase Firestore
 
-class Pantallasala extends StatefulWidget {
-  //Guardamos el codigo de autorizacion que nos mandamos
-  final String? codigo;
-  const Pantallasala({super.key, this.codigo});
+class PantallaSala extends StatefulWidget {
+  final String codigoDeAutorizacion;
+
+  const PantallaSala({super.key, required this.codigoDeAutorizacion});
 
   @override
-  State<Pantallasala> createState() => _PantallasalaState();
+  State<PantallaSala> createState() => _PantallaSalaState();
 }
 
-class _PantallasalaState extends State<Pantallasala> {
-  // Variables para controlar el estado de la petición en la pantalla
-  bool _cargando = true;
+class _PantallaSalaState extends State<PantallaSala> {
+  // Variables de Control de Estado
+  bool _procesando = true;
   String? _errorMensaje;
-  String? _accessTokenObtenido;
+
+  // Datos de la Sala creados en Firebase
+  String? _idSala;
+  String? _accessToken;
+
+  // Controladores para la Interfaz Gráfica
+  final TextEditingController _searchController = TextEditingController();
+  double _progresoCancion = 0.3; // Simulación: barra al 30%
 
   @override
   void initState() {
     super.initState();
-    // En cuanto se crea la pantalla, ejecutamos automáticamente el canje del token
-    canjearCodigoPorToken();
+    // Iniciamos todo el flujo automático secuencial
+    ejecutarFlujoInicial();
   }
 
-  // === LA FUNCIÓN QUE HACE EL TRABAJO DE POSTMAN ===
-  Future<void> canjearCodigoPorToken() async {
-    final String urlSpotify = 'https://accounts.spotify.com/api/token';
+  // Flujo ordenado: Canjea Token -> Genera Sala -> Sube a Firebase
+  Future<void> ejecutarFlujoInicial() async {
+    try {
+      Map<String, dynamic>? tokens = await canjearCodigoPorToken();
 
-    // Coloca aquí las credenciales exactas de tu docente
+      // --- ESTA ES LA CLAVE ---
+      // Si el usuario presionó 'atrás' mientras esperaba el token,
+      // la pantalla ya no está 'montada' y debemos detener la ejecución.
+      if (!mounted) return;
+
+      if (tokens != null) {
+        _accessToken = tokens['access_token'];
+        String refreshToken = tokens['refresh_token'];
+        String salaAleatoria = (1000 + Random().nextInt(9000)).toString();
+
+        await FirebaseFirestore.instance
+            .collection('salas')
+            .doc(salaAleatoria)
+            .set({
+              'codigo_sala': salaAleatoria,
+              'spotify_access_token': _accessToken,
+              'spotify_refresh_token': refreshToken,
+              'creado_en': FieldValue.serverTimestamp(),
+            });
+
+        // --- SEGUNDO CHECK ---
+        if (!mounted) return;
+
+        setState(() {
+          _idSala = salaAleatoria;
+          _procesando = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted)
+        return; // Evita el crash al intentar mostrar un error en una pantalla cerrada
+      setState(() {
+        _errorMensaje = "Error: $e";
+        _procesando = false;
+      });
+    }
+  }
+
+  // Petición HTTP POST idéntica a tu Postman
+  Future<Map<String, dynamic>?> canjearCodigoPorToken() async {
+    final String urlSpotify = 'https://accounts.spotify.com/api/token';
     final String clientId = 'cf4410e8df834a21998c3fe4d6518987';
     final String clientSecret = 'eb34c8686e6044b9b6a2fcc6b37e9bb1';
     final String redirectUri = 'https://macrobyte.site';
 
-    try {
-      print("HTTP: Iniciando petición POST hacia Spotify...");
+    final response = await http.post(
+      Uri.parse(urlSpotify),
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: {
+        'grant_type': 'authorization_code',
+        'code': widget.codigoDeAutorizacion,
+        'redirect_uri': redirectUri,
+        'client_id': clientId,
+        'client_secret': clientSecret,
+      },
+    );
 
-      // Hacemos el HTTP POST idéntico a tu Postman
-      final response = await http.post(
-        Uri.parse(urlSpotify),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {
-          'grant_type': 'authorization_code',
-          'code': widget.codigo, // Usamos el código que llegó por la ventana
-          'redirect_uri': redirectUri,
-          'client_id': clientId,
-          'client_secret': clientSecret,
-        },
-      );
-
-      // Evaluamos la respuesta de Spotify (200 significa éxito)
-      if (response.statusCode == 200) {
-        // Convertimos el texto JSON que nos devolvió Spotify a un Mapa de Dart
-        final Map<String, dynamic> datosJson = jsonDecode(response.body);
-
-        setState(() {
-          _accessTokenObtenido = datosJson['access_token'];
-          _cargando = false;
-        });
-
-        print("================ RESPUESTA EXITOSA DE SPOTIFY ================");
-        print("¡Token obtenido desde Flutter con éxito!");
-        print("Access Token: $_accessTokenObtenido");
-        print("Refresh Token: ${datosJson['refresh_token']}");
-        print("==============================================================");
-      } else {
-        // Si dio 400, 401, 403, etc.
-        final Map<String, dynamic> errorJson = jsonDecode(response.body);
-        setState(() {
-          _errorMensaje =
-              "Error de Spotify: ${errorJson['error_description'] ?? 'Petición inválida'}";
-          _cargando = false;
-        });
-        print("Error en el canje: ${response.body}");
-      }
-    } catch (e) {
-      // Por si se corta el internet o la URL está mal escrita
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
       setState(() {
-        _errorMensaje =
-            "Error de conexión: No se pudo conectar con el servidor.";
-        _cargando = false;
+        _errorMensaje = "Spotify rechazó las credenciales. Revisa el código.";
+        _procesando = false;
       });
-      print("Exception capturada: $e");
+      return null;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Si está cargando o procesando Firebase, muestra pantalla de espera
+    if (_procesando) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0E21),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              CircularProgressIndicator(color: Colors.green),
+              SizedBox(height: 20),
+              Text(
+                "Configurando Sala y Vinculando Base de Datos...",
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Si falló algo en el camino, muestra el error centrado
+    if (_errorMensaje != null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0E21),
+        body: Center(
+          child: Text(
+            _errorMensaje!,
+            style: const TextStyle(color: Colors.red, fontSize: 18),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    // INTERFAZ DE LA SALA MULTIMEDIA COMPLETA (ÉXITO)
     return Scaffold(
+      backgroundColor: const Color(0xFF0A0E21), // Fondo oscuro elegante
       appBar: AppBar(
-        title: const Text("Sala de Música"),
+        title: Text(
+          "Sala: $_idSala",
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+        ),
         backgroundColor: const Color(0xFF015EF3),
-        iconTheme: IconThemeData(color: Colors.white),
+        centerTitle: true,
       ),
-      // Evaluamos con condicionales qué widget pintar en medio de la pantalla
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: _cargando
-              ? const CircularProgressIndicator() // Muestra la ruedita si está cargando
-              : _errorMensaje != null
-              ? Text(
-                  _errorMensaje!, // Muestra el error al medio en rojo si falló
-                  style: const TextStyle(
-                    color: Colors.red,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.check_circle,
-                      color: Colors.green,
-                      size: 80,
-                    ),
-                    const SizedBox(height: 15),
-                    const Text(
-                      "¡Token Canjeado con Éxito!",
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
+      body: Column(
+        children: [
+          // 1. BARRA DE BÚSQUEDA (Arriba)
+          Padding(
+            padding: const EdgeInsets.all(15.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: "Buscar canción en Spotify...",
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.1),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(15),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Token: ${_accessTokenObtenido!.substring(0, 20)}...", // Muestra solo el inicio para no saturar
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
+                  ),
                 ),
-        ),
+                const SizedBox(width: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF015EF3),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.search, color: Colors.white),
+                    onPressed: () {
+                      print("Buscando en Spotify: ${_searchController.text}");
+                      // TODO: Aquí dispararemos el GET de búsqueda usando el _accessToken
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 2. REPRODUCTOR CENTRAL (Al Medio)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 25.0, vertical: 10),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(25),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              child: Column(
+                children: [
+                  // Imagen de la canción (Por ahora una estática de prueba)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(15),
+                    child: Image.network(
+                      'https://picsum.photos/250', // Imagen aleatoria temporal
+                      height: 180,
+                      width: 180,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  const Text(
+                    "Canción de Prueba",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Text(
+                    "Artista Desconocido",
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+
+                  // Barra de progreso interactiva (Slider)
+                  Slider(
+                    value: _progresoCancion,
+                    activeColor: const Color(0xFF1DB954), // Verde Spotify
+                    inactiveColor: Colors.white24,
+                    onChanged: (value) {
+                      setState(() {
+                        _progresoCancion = value;
+                      });
+                    },
+                  ),
+
+                  // Controles Multimedia
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        icon: const Icon(
+                          Icons.skip_previous,
+                          color: Colors.white,
+                          size: 36,
+                        ),
+                        onPressed: () => print("Anterior"),
+                      ),
+                      const SizedBox(width: 20),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.play_circle_filled,
+                          color: Colors.white,
+                          size: 56,
+                        ),
+                        onPressed: () => print("Play / Pause"),
+                      ),
+                      const SizedBox(width: 20),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.skip_next,
+                          color: Colors.white,
+                          size: 36,
+                        ),
+                        onPressed: () => print("Siguiente"),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+          const Text(
+            "COLA DE REPRODUCCIÓN",
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 2,
+            ),
+          ),
+
+          // 3. LISTA DE REPRODUCCIÓN / COLA (Abajo)
+          Expanded(
+            child: ListView.builder(
+              itemCount: 5, // Simulación: 5 canciones fijas por ahora
+              itemBuilder: (context, index) {
+                return ListTile(
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: Image.network(
+                      'https://picsum.photos/50',
+                      width: 40,
+                      height: 40,
+                    ),
+                  ),
+                  title: Text(
+                    "Canción en Cola $index",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  subtitle: Text(
+                    "Artista Ejemplo $index",
+                    style: const TextStyle(color: Colors.white60),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(
+                      Icons.remove_circle_outline,
+                      color: Colors.redAccent,
+                    ),
+                    onPressed: () {
+                      print("Eliminar canción índice $index");
+                      // Lógica de borrado futuro para el creador
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
