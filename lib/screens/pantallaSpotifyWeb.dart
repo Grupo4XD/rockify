@@ -24,7 +24,7 @@ class _PantallaspotifywebState extends State<Pantallaspotifyweb> {
       //Escucha eventos del navegador
       ..setNavigationDelegate(
         NavigationDelegate(
-          //El parametro request contiene toda la informacion a a la ue el usaurio intenta ir
+          //El parametro request contiene toda la informacion a a la que el usuario intenta ir
           onNavigationRequest: (NavigationRequest request) {
             if (request.url.startsWith('https://macrobyte.site')) {
               //Agarramos la respuesta de la URL, convirtiendolo en un map
@@ -33,12 +33,13 @@ class _PantallaspotifywebState extends State<Pantallaspotifyweb> {
               String? authCode = uri.queryParameters['code'];
               if (authCode != null) {
                 //Context es la pantalla home en el que estabamos, y authCode devuelve el valor de authcode a esa pantalla
+
                 // pushReplacement destruye la miniventana y monta la pantalla de la sala encima
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(
                     builder: (context) =>
-                        Pantallasala(),
+                        Pantallasala(codigo: authCode,),
                   ),
                 ); // Devuelve el código
               }
