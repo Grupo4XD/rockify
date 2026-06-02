@@ -29,7 +29,7 @@ class _PantallaspotifywebState extends State<Pantallaspotifyweb> {
             if (request.url.startsWith('https://macrobyte.site')) {
               //Agarramos la respuesta de la URL, convirtiendolo en un map
               Uri uri = Uri.parse(request.url);
-              print("EL PARSE HACE LO SIGUIENTE CON L AUROI $uri");
+              print("EL PARSE HACE LO SIGUIENTE CON LA URI $uri");
               //Partimos en partes la URL y sacamos el valor code
               String? authCode = uri.queryParameters['code'];
               if (authCode != null) {
@@ -49,7 +49,7 @@ class _PantallaspotifywebState extends State<Pantallaspotifyweb> {
             }
             //Para que navege correctamente en spotify
             return NavigationDecision.navigate;
-          },
+          },  
         ),
       )
       ..loadRequest(

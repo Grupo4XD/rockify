@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pruebas2_original/screens/pantallaSpotifyWeb.dart';
+import 'package:pruebas2_original/screens/pantallaUnirmeSala.dart';
 
 class Pantallahome extends StatefulWidget {
   const Pantallahome({super.key});
@@ -66,7 +67,12 @@ class _PantallahomeState extends State<Pantallahome> {
               child: ElevatedButton(
                 style: estiloBotones, // Usa exactamente el mismo estilo
                 onPressed: () {
-                  print("Unirme a una sala presionado");
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PantallaUnirmeSala(),
+                    ),
+                  );
                 },
                 child: const Text("Unirme a una sala"),
               ),
