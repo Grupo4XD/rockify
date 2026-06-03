@@ -46,63 +46,63 @@ class _PantallaSalaState extends State<PantallaSala> {
     ejecutarFlujoInicial();
   }
 
-  //#################### FUNCIONES ##############################
-  // === FUNCIÓN PARA AÑADIR CANCIÓN A LA COLA REAL DE SPOTIFY ===
-  Future<void> anadirCancionACola(String trackUri, String titulo) async {
-    // Estructuramos la URL con el parámetro 'uri' obligatorio de Spotify
-    print("ESTA ES TU URI: $trackUri");
-    final Uri urlCola = Uri.parse(
-      'https://api.spotify.com/v1/me/player/queue?uri=$trackUri',
-    );
+  // === NUEVA LOGICA: AÑADE LA CANCIÓN A LA BASE DE DATOS DE FIREBASE ===
+  Future<void> anadirCancionACola(Map<String, dynamic> cancionJson) async {
+    // 1. Extraemos los datos de forma segura del JSON que nos dio Spotify
+    String titulo = cancionJson['name'] ?? 'Sin título';
+    String artista = cancionJson['artists'][0]['name'] ?? 'Artista desconocido';
+    String trackUri = cancionJson['uri'] ?? '';
+
+    String urlFoto = 'https://picsum.photos/50';
+    if (cancionJson['album'] != null &&
+        cancionJson['album']['images'].isNotEmpty) {
+      urlFoto = cancionJson['album']['images'][2]['url']; // Foto pequeña
+    }
+
+    print("Firebase LOG: Guardando en la nube -> $titulo");
 
     try {
-      print("HTTP POST: Añadiendo a la cola real -> $titulo");
+      // 2. Apuntamos a la ruta exacta en Firestore: salas > ID_DE_TU_SALA > cola
+      // Usamos .add() para que Firebase genere un ID único automático a esta canción
+      await FirebaseFirestore.instance
+          .collection('salas')
+          .doc(_idSala) // Usa el ID de la sala actual generado al inicio
+          .collection('cola')
+          .add({
+            'titulo': titulo,
+            'artista': artista,
+            'foto': urlFoto,
+            'uri': trackUri,
+            'timestamp':
+                FieldValue.serverTimestamp(), // Guarda la hora exacta del servidor de Firebase
+          });
 
-      final response = await http.post(
-        urlCola,
-        headers: {
-          'Authorization': 'Bearer $_accessToken',
-          'Content-Type': 'application/json',
-        },
+      // 3. Si Firebase responde con éxito, cerramos el buscador y limpiamos
+      if (!mounted) return;
+
+      setState(() {
+        _mostrarResultados = false; // Escondemos la capa flotante
+        _searchController.clear(); // Limpiamos el texto de la caja
+      });
+
+      // 4. Mostramos el mensaje de éxito en la pantalla del usuario
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.green,
+          content: Text("¡'$titulo' guardada en la lista de la sala!"),
+          duration: const Duration(seconds: 2),
+        ),
       );
-
-      // Spotify devuelve 204 No Content cuando la acción es exitosa
-      if (response.statusCode == 204 || response.statusCode == 200) {
-        print("¡Canción añadida con éxito a Spotify!");
-
-        if (!mounted) return;
-
-        // Cerramos la ventana flotante de búsqueda para volver al reproductor
-        setState(() {
-          _mostrarResultados = false;
-          _searchController.clear();
-        });
-
-        // Mostramos el mensaje en pantalla de que se añadió con éxito
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.green,
-            content: Text("¡'$titulo' añadida a la cola con éxito!"),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-
-        // Refrescamos el reproductor de inmediato para ver si cambió algo
-        obtenerCancionActual();
-        obtenerColaRealSpotify();
-      } else {
-        print("Error al añadir a la cola: ${response.body}");
-        if (!mounted) return;
-        // Si sale error, probablemente es porque Spotify no está abierto en segundo plano
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: Colors.redAccent,
-            content: Text("Asegúrate de tener Spotify abierto y sonando."),
-          ),
-        );
-      }
+      
     } catch (e) {
-      print("Exception al añadir a la cola: $e");
+      print("Error al guardar en Firebase: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Text("Error de conexión con la base de datos."),
+        ),
+      );
     }
   }
 
@@ -266,10 +266,81 @@ class _PantallaSalaState extends State<PantallaSala> {
             obtenerColaRealSpotify();
           }
         });
+        // ==========================================================
+        // ESCUCHADOR EN SEGUNDO PLANO: ENVÍA CANCIONES DE FIREBASE A SPOTIFY
+        // ==========================================================
+        FirebaseFirestore.instance
+            .collection('salas')
+            .doc(_idSala)
+            .collection('cola')
+            .orderBy('timestamp', descending: false)
+            .snapshots()
+            .listen((snapshot) async {
+              // 1. Si entran documentos nuevos a la cola de Firebase
+              if (snapshot.docs.isNotEmpty) {
+                // 2. Tomamos siempre la primera canción de la fila (la más antigua en espera)
+                final primerDocumento = snapshot.docs.first;
+                final datosCancion = primerDocumento.data();
+
+                String trackUri = datosCancion['uri'] ?? '';
+                String titulo = datosCancion['titulo'] ?? 'Tema';
+                String idDocumento =
+                    primerDocumento.id; // El ID único del documento en Firebase
+
+                // Evitamos enviar documentos que no se hayan terminado de guardar en el servidor
+                if (datosCancion['timestamp'] == null) return;
+
+                print(
+                  "Bridge LOG: Detectada nueva petición en Firebase -> $titulo. Enviando a Spotify...",
+                );
+
+                // 3. PASO MAESTRO: Llamamos a la API real de Spotify para meterla a los parlantes
+                // Usamos Uri.parse y le pegamos el parámetro ?uri= al final como pide Spotify
+                final Uri urlSpotifyCola = Uri.parse(
+                  'https://api.spotify.com/v1/me/player/queue?uri=$trackUri',
+                );
+
+                try {
+                  final response = await http.post(
+                    urlSpotifyCola,
+                    headers: {
+                      'Authorization': 'Bearer $_accessToken',
+                      'Content-Type': 'application/json',
+                    },
+                  );
+
+                  // 4. Si Spotify la aceptó con éxito (Código 204 o 200)
+                  if (response.statusCode == 204 ||
+                      response.statusCode == 200) {
+                    print(
+                      "Bridge LOG: ¡'$titulo' inyectada con éxito en los parlantes de Spotify!",
+                    );
+
+                    // 5. Como ya la tiene Spotify, la borramos de Firebase para limpiar la pantalla
+                    // y evitar que se vuelva a enviar en un bucle infinito.
+                    await FirebaseFirestore.instance
+                        .collection('salas')
+                        .doc(_idSala)
+                        .collection('cola')
+                        .doc(idDocumento)
+                        .delete();
+
+                    print("Bridge LOG: Documento limpiado de Firebase.");
+                  } else {
+                    print(
+                      "Bridge LOG: Spotify rechazó la canción: ${response.body}",
+                    );
+                  }
+                } catch (e) {
+                  print("Bridge LOG: Error enviando a la API de Spotify: $e");
+                }
+              }
+            });
       }
     } catch (e) {
-      if (!mounted)
+      if (!mounted) {
         return; // Evita el crash al intentar mostrar un error en una pantalla cerrada
+      }
 
       setState(() {
         _errorMensaje = "Error: $e";
@@ -421,6 +492,10 @@ class _PantallaSalaState extends State<PantallaSala> {
           IconButton(
             icon: const Icon(Icons.exit_to_app, color: Colors.white),
             onPressed: () {
+              FirebaseFirestore.instance
+                  .collection('salas')
+                  .doc(_idSala)
+                  .delete(); // Borra la sala de Firebase al salir
               Navigator.pop(context); // Regresa a la pantalla anterior (login)
             },
           ),
@@ -546,8 +621,12 @@ class _PantallaSalaState extends State<PantallaSala> {
                 ),
               ),
 
-              // LISTA REAL DE LA COLA (Abajo)
-              // LISTA REAL DE LA COLA (Abajo de la pantalla)
+              // ==========================================================
+              // NUEVA CAPA DE COLA EN TIEMPO REAL CON FIREBASE (STREAMBUILDER)
+              // ==========================================================
+              // ==========================================================
+              // VISTA DE LA COLA REAL COMPLETA DESDE SPOTIFY
+              // ==========================================================
               Expanded(
                 child: _colaReproduccion.isEmpty
                     ? const Center(
@@ -561,16 +640,18 @@ class _PantallaSalaState extends State<PantallaSala> {
                         itemBuilder: (context, index) {
                           final cancionCola = _colaReproduccion[index];
 
-                          // Mapeo seguro directo desde el JSON de Spotify
+                          // Mapeo seguro directo desde el JSON de la API de Spotify
                           String tituloCola =
                               cancionCola['name'] ?? 'Sin título';
                           String artistaCola =
-                              cancionCola['artists'][0]['name'] ??
-                              'Artista desconocido';
+                              cancionCola['artists'] != null &&
+                                  cancionCola['artists'].isNotEmpty
+                              ? cancionCola['artists'][0]['name']
+                              : 'Artista desconocido';
 
-                          // Extrae la imagen pequeña del álbum si viene en los datos
                           String urlFotoMini = 'https://picsum.photos/50';
                           if (cancionCola['album'] != null &&
+                              cancionCola['album']['images'] != null &&
                               cancionCola['album']['images'].isNotEmpty) {
                             urlFotoMini =
                                 cancionCola['album']['images'][2]['url'];
@@ -727,10 +808,7 @@ class _PantallaSalaState extends State<PantallaSala> {
                                       color: Colors.greenAccent,
                                     ),
                                     onPressed: () {
-                                      anadirCancionACola(
-                                        cancion['uri'],
-                                        titulo,
-                                      );
+                                      anadirCancionACola(cancion);
                                       // El siguiente paso será enlazar esto a la API de agregar a la cola
                                     },
                                   ),
