@@ -57,7 +57,7 @@ class _PantallaSalaState extends State<PantallaSala> {
     if (cancionJson['album'] != null &&
         cancionJson['album']['images'].isNotEmpty) {
       urlFoto = cancionJson['album']['images'][2]['url']; // Foto pequeña
-    }
+    } 
 
     print("Firebase LOG: Guardando en la nube -> $titulo");
 
@@ -113,6 +113,8 @@ class _PantallaSalaState extends State<PantallaSala> {
     final Uri urlActual = Uri.parse(
       'https://api.spotify.com/v1/me/player/currently-playing',
     );
+
+    print('LO QUE VOTA EL URI.PARSE $urlActual');
 
     try {
       final response = await http.get(

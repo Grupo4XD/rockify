@@ -33,11 +33,6 @@ class MainApp extends StatelessWidget {
     );
   }
 
-
-
-
-
-
   // ignore: non_constant_identifier_names
   AppBar MyAppbar() {
     return AppBar(
